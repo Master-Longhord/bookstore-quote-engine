@@ -1,4 +1,21 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: bookstore-postgres
+    environment:
+      POSTGRES_USER: bookstore_admin
+      POSTGRES_PASSWORD: secure_password_here
+      POSTGRES_DB: bookstore
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookstore_admin -d bookstore"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     container_name: bookstore-app
@@ -9,4 +26,11 @@ services:
     env_file:
       - .env
     environment:
-      - DB_PATH=/srv/data/inquiries.db
+      # This points to the Docker service name 'postgres' instead of 'localhost'
+      - DATABASE_URL=postgresql+psycopg://bookstore_admin:secure_password_here@postgres:5432/bookstore
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

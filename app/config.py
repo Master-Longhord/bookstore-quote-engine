@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # --- Files / storage ---
     inventory_csv: str = "data/inventory.csv"
-    db_path: str = "data/inquiries.db"
+    database_url: str
 
     # --- Review dashboard ---
     admin_token: str = "change-me-too"                 

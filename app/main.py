@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request, Response
 from app.adapters.claude_extractor import ClaudeExtractor
 from app.adapters.csv_inventory import CsvInventoryRepository
 from app.adapters.fuzzy_matcher import FuzzyBookMatcher
-from app.adapters.sqlite_store import SqliteInquiryStore
+from app.adapters.postgres_store import PostgresInquiryStore
 from app.adapters.whatsapp_client import WhatsAppClient, parse_webhook, to_incoming
 from app.config import load_settings
 from app.review.routes import build_router
@@ -42,7 +42,7 @@ matcher = FuzzyBookMatcher(
     confident_threshold=settings.auto_send_threshold,
 )
 extractor = ClaudeExtractor(settings.anthropic_api_key, settings.extraction_model)
-store = SqliteInquiryStore(settings.db_path)
+store = PostgresInquiryStore(settings.database_url)
 whatsapp = WhatsAppClient(settings.wa_access_token, settings.wa_phone_number_id)
 renderer = WhatsAppQuoteRenderer(store_name="our bookstore")
 service = InquiryService(
@@ -62,10 +62,15 @@ _executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
 def _process_job(raw: dict) -> None:
     try:
+        log.info("Processing raw payload: %s", raw)
         msg = to_incoming(raw, whatsapp)
         if msg is None:
-            return  # statuses, reactions, audio... ignore quietly
+            log.info("Skipped: Payload is not an incoming user message (likely delivery status).")
+            return
+        
+        log.info("Parsed message from %s: '%s'", msg.sender, msg.text)
         service.handle_message(msg)
+        log.info("Message handled successfully.")
     except Exception:
         log.exception("Failed processing message %s", raw.get("id"))
 
@@ -91,7 +96,14 @@ def verify(request: Request) -> Response:
 @app.post("/webhook")
 async def receive(request: Request) -> dict:
     payload = await request.json()
-    for raw in parse_webhook(payload):
-        if store.mark_seen(raw.get("id", "")):  # dedup Meta's redeliveries
+    items = list(parse_webhook(payload))
+    log.info("Received webhook containing %d item(s)", len(items))
+    
+    for raw in items:
+        msg_id = raw.get("id", "")
+        is_new = store.mark_seen(msg_id)
+        log.info("Message ID '%s' -> mark_seen: %s", msg_id, is_new)
+        if is_new:
             _executor.submit(_process_job, raw)
+            
     return {"status": "queued"}  # always 200, always fast

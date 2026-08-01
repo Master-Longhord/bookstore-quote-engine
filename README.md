@@ -112,3 +112,5 @@ docker compose up -d --build
 docker compose build --no-cache
 docker compose up -d
 docker compose restart app
+
+docker exec -it bookstore-postgres psql -U bookstore_admin -d bookstore

@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel
 
+
 class MediaKind(str, Enum):
     TEXT = "text"
     IMAGE = "image"
@@ -76,7 +77,7 @@ class QuoteLine:
     requested_title: str
     quantity: int
     matched: Optional[InventoryItem]        # None => "not found"
-    confidence: float                        # 0 when unmatched
+    confidence: float                       # 0 when unmatched
 
     @property
     def line_total(self) -> float:
@@ -111,6 +112,7 @@ class InquiryStatus(str, Enum):
     CONFIRMED = "confirmed"              # user replied YES
     FAILED = "failed"
 
+
 @dataclass
 class Inquiry:
     """The unit of work: one inbound book list, end to end."""
@@ -125,12 +127,18 @@ class Inquiry:
     quote: Optional[Quote] = None
     revised_quote: Optional[Quote] = None
     error: Optional[str] = None
+    
+    # Claim state for concurrent reviews
+    claimed_by: Optional[str] = None
+    claimed_at: Optional[float] = None
+
 
 class DashboardLineItem(BaseModel):
     sku: str
     title: str
     quantity: int
     override_price: float
+
 
 class ManualReviewSubmission(BaseModel):
     lines: list[DashboardLineItem]

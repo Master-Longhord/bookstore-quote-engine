@@ -165,4 +165,6 @@ def _deserialize(d: dict) -> Inquiry:
         quote=parse_quote(d.get("quote")),
         revised_quote=parse_quote(d.get("revised_quote")),
         error=d.get("error"),
+        claimed_by=d.get("claimed_by"),
+        claimed_at=d.get("claimed_at"),
     )

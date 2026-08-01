@@ -12,6 +12,15 @@
     .flex-group { display: flex; gap: 8px; align-items: center; }
     button { margin: .6rem 0; padding: .5rem 1rem; cursor: pointer; }
     .stats { color: #666; }
+    
+    /* Concurrency UI Styles */
+    fieldset { border: none; padding: 0; margin: 0; }
+    .status-banner { display: flex; gap: 10px; align-items: center; padding: 10px; background: #f8f9fa; border-radius: 6px; margin-bottom: 10px; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .badge-unclaimed { background-color: #d4edda; color: #155724; }
+    .badge-locked { background-color: #fff3cd; color: #856404; }
+    .btn-release { background-color: #dc3545; color: white; border: none; border-radius: 4px; }
+    .btn-claim { background-color: #007bff; color: white; border: none; border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -22,53 +31,67 @@
     <p>Nothing waiting. ✨</p>
   {% else %}
     {% for inq in pending %}
-      <form method="post" action="/review/{{ inq.id }}/approve?token={{ token }}">
-        <h3>{{ inq.sender_name or inq.sender }} <small>({{ inq.sender }})</small></h3>
-        <table>
-          <!-- loop.index0 gives us 0, 1, 2... similar to enumerate -->
-          {% for m in inq.matches %}
-          <tr>
-            <td>
-              {{ m.requested.title }}<br>
-              <small>qty {{ m.requested.quantity }} &middot; best {% if m.best %}{{ m.best.score | round(0) }}%{% else %}no match{% endif %}</small>
-            </td>
-            <td>
-              <div class="flex-group">
-                <!-- Dropdown -->
-                <select name="line-{{ loop.index0 }}" id="select-{{ inq.id }}-{{ loop.index0 }}">
-                  
-                  <!-- Build Candidate List in Template -->
-                  {% set cands = [] %}
-                  {% if m.best %}{% set _ = cands.append(m.best) %}{% endif %}
-                  {% for alt in m.alternatives %}{% set _ = cands.append(alt) %}{% endfor %}
+      <div class="inquiry-container" id="container-{{ inq.id }}">
+        
+        <!-- Status Banner for Locking UI -->
+        <div class="status-banner">
+            <span class="badge badge-unclaimed" id="badge-{{ inq.id }}">Loading status...</span>
+            <button type="button" class="btn-claim" id="btn-claim-{{ inq.id }}" onclick="claimInquiry('{{ inq.id }}')" style="display:none;">Start Review</button>
+            <button type="button" class="btn-release" id="btn-release-{{ inq.id }}" onclick="unclaimInquiry('{{ inq.id }}')" style="display:none;">Release Claim</button>
+        </div>
 
-                  {% for c in cands %}
-                    <option value="{{ c.item.sku }}" {% if m.best and c.item.sku == m.best.item.sku %}selected{% endif %}>
-                      {{ c.item.title }} (JMD) {{ jmd(c.item.price) }} ({{ c.score | round(0) }}%{% if not c.item.in_stock %}, OUT OF STOCK{% endif %})
-                    </option>
-                  {% endfor %}
-                  <option value="" {% if not m.best %}selected{% endif %}>Not available / skip</option>
-                </select>
-                
-                <!-- Manual Override Inputs (Title and Price) -->
-                <div id="manual-group-{{ inq.id }}-{{ loop.index0 }}" class="flex-group" style="display: none; width: 100%;">
-                    <input type="text" name="manual_title-{{ loop.index0 }}" id="title-{{ inq.id }}-{{ loop.index0 }}" placeholder="Custom Title" disabled style="flex: 2;">
-                    <input type="number" step="0.01" name="manual_price-{{ loop.index0 }}" id="price-{{ inq.id }}-{{ loop.index0 }}" placeholder="Price (JMD)" disabled style="flex: 1;">
-                </div>
-                
-                <!-- Toggle Button -->
-                <button type="button" onclick="toggleEdit('{{ inq.id }}-{{ loop.index0 }}')" title="Custom Override">✏️</button>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        </table>
-        <button type="submit">Approve &amp; send quote</button>
-      </form>
-      <hr>
+        <form method="post" action="/review/{{ inq.id }}/approve?token={{ token }}" id="form-{{ inq.id }}">
+          <!-- Hidden input passes the anonymous browser ID to the approval route -->
+          <input type="hidden" name="reviewer_token" class="token-input">
+          
+          <!-- Fieldset disables the entire form if the user doesn't own the lock -->
+          <fieldset id="fieldset-{{ inq.id }}" disabled>
+            <h3>{{ inq.sender_name or inq.sender }} <small>({{ inq.sender }})</small></h3>
+            <table>
+              {% for m in inq.matches %}
+              <tr>
+                <td>
+                  {{ m.requested.title }}<br>
+                  <small>qty {{ m.requested.quantity }} &middot; best {% if m.best %}{{ m.best.score | round(0) }}%{% else %}no match{% endif %}</small>
+                </td>
+                <td>
+                  <div class="flex-group">
+                    <!-- Dropdown -->
+                    <select name="line-{{ loop.index0 }}" id="select-{{ inq.id }}-{{ loop.index0 }}">
+                      {% set cands = [] %}
+                      {% if m.best %}{% set _ = cands.append(m.best) %}{% endif %}
+                      {% for alt in m.alternatives %}{% set _ = cands.append(alt) %}{% endfor %}
+
+                      {% for c in cands %}
+                        <option value="{{ c.item.sku }}" {% if m.best and c.item.sku == m.best.item.sku %}selected{% endif %}>
+                          {{ c.item.title }} (JMD) {{ jmd(c.item.price) }} ({{ c.score | round(0) }}%{% if not c.item.in_stock %}, OUT OF STOCK{% endif %})
+                        </option>
+                      {% endfor %}
+                      <option value="" {% if not m.best %}selected{% endif %}>Not available / skip</option>
+                    </select>
+                    
+                    <!-- Manual Override Inputs (Title and Price) -->
+                    <div id="manual-group-{{ inq.id }}-{{ loop.index0 }}" class="flex-group" style="display: none; width: 100%;">
+                        <input type="text" name="manual_title-{{ loop.index0 }}" id="title-{{ inq.id }}-{{ loop.index0 }}" placeholder="Custom Title" disabled style="flex: 2;">
+                        <input type="number" step="0.01" name="manual_price-{{ loop.index0 }}" id="price-{{ inq.id }}-{{ loop.index0 }}" placeholder="Price (JMD)" disabled style="flex: 1;">
+                    </div>
+                    
+                    <!-- Toggle Button -->
+                    <button type="button" onclick="toggleEdit('{{ inq.id }}-{{ loop.index0 }}')" title="Custom Override">✏️</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </table>
+            <button type="submit">Approve &amp; send quote</button>
+          </fieldset>
+        </form>
+        <hr>
+      </div>
     {% endfor %}
   {% endif %}
 
+  <!-- Existing Toggle Script -->
   <script>
     function toggleEdit(id) {
       const select = document.getElementById('select-' + id);
@@ -77,24 +100,123 @@
       const priceInput = document.getElementById('price-' + id);
       
       if (select.hidden) {
-        // Switch to Dropdown mode
         select.hidden = false; 
         select.disabled = false;
-        
         manualGroup.style.display = 'none';
         titleInput.disabled = true;
         priceInput.disabled = true;
       } else {
-        // Switch to Manual Edit mode
         select.hidden = true; 
         select.disabled = true;
-        
         manualGroup.style.display = 'flex';
         titleInput.disabled = false;
         priceInput.disabled = false;
         titleInput.focus();
       }
     }
+  </script>
+
+  <!-- Concurrency State & Polling Script -->
+  <script>
+    const API_TOKEN = '{{ token }}';
+    
+    // 1. Establish Anonymous Identity
+    let reviewerToken = localStorage.getItem('reviewer_token');
+    if (!reviewerToken) {
+        reviewerToken = 'rev_' + Math.random().toString(36).substring(2, 10);
+        localStorage.setItem('reviewer_token', reviewerToken);
+    }
+    
+    // Inject token into all hidden form inputs
+    document.querySelectorAll('.token-input').forEach(input => {
+        input.value = reviewerToken;
+    });
+
+    // 2. State Management Logic
+    function updateUI(id, claimedBy, claimedAt, serverTime) {
+        const fieldset = document.getElementById(`fieldset-${id}`);
+        const badge = document.getElementById(`badge-${id}`);
+        const btnClaim = document.getElementById(`btn-claim-${id}`);
+        const btnRelease = document.getElementById(`btn-release-${id}`);
+
+        if (!fieldset) return; // Skip if inquiry is no longer on the DOM
+
+        const isExpired = claimedAt && (serverTime - claimedAt) >= 300;
+
+        if (!claimedBy || isExpired) {
+            // State: Unclaimed
+            badge.className = 'badge badge-unclaimed';
+            badge.innerText = 'Unclaimed';
+            fieldset.disabled = true;
+            btnClaim.style.display = 'inline-block';
+            btnRelease.style.display = 'none';
+        } else if (claimedBy === reviewerToken) {
+            // State: Locked by Me
+            badge.className = 'badge badge-locked';
+            badge.innerText = 'You are reviewing this';
+            fieldset.disabled = false;
+            btnClaim.style.display = 'none';
+            btnRelease.style.display = 'inline-block';
+        } else {
+            // State: Locked by Someone Else
+            badge.className = 'badge badge-locked';
+            badge.innerText = 'In Review by another user';
+            fieldset.disabled = true;
+            btnClaim.style.display = 'none';
+            btnRelease.style.display = 'none';
+        }
+    }
+
+    // 3. API Actions
+    async function claimInquiry(id, silent = false) {
+        try {
+            await fetch(`/review/${id}/claim?token=${API_TOKEN}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: reviewerToken })
+            });
+            if (!silent) pollStatus();
+        } catch (err) {
+            console.error("Claim failed", err);
+        }
+    }
+
+    async function unclaimInquiry(id) {
+        try {
+            await fetch(`/review/${id}/unclaim?token=${API_TOKEN}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: reviewerToken })
+            });
+            pollStatus();
+        } catch (err) {
+            console.error("Unclaim failed", err);
+        }
+    }
+
+    // 4. Polling & Heartbeat Loop
+    async function pollStatus() {
+        try {
+            const res = await fetch(`/review/api/pending?token=${API_TOKEN}`);
+            const data = await res.json();
+            
+            data.locks.forEach(lock => {
+                updateUI(lock.id, lock.claimed_by, lock.claimed_at, data.server_time);
+                
+                // Heartbeat: If I own this lock, ping the server to reset the 5-min expiration timer
+                const isExpired = lock.claimed_at && (data.server_time - lock.claimed_at) >= 300;
+                if (lock.claimed_by === reviewerToken && !isExpired) {
+                    claimInquiry(lock.id, true);
+                }
+            });
+        } catch (err) {
+            console.error("Failed to poll concurrency status", err);
+        }
+    }
+
+    // Run poll immediately on load, then every 5 seconds
+    pollStatus();
+    setInterval(pollStatus, 5000);
   </script>
 </body>
 </html>

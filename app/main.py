@@ -15,8 +15,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-import queue
-import threading
+import concurrent.futures
 
 from fastapi import FastAPI, Request, Response
 
@@ -35,7 +34,7 @@ log = logging.getLogger("bookstore")
 
 settings = load_settings()
 
-# ---- wire the graph (Dependency Injection, done by hand — no framework needed) ----
+# ---- wire the graph (Dependency Injection, done by hand, no framework needed) ----
 inventory = CsvInventoryRepository(settings.inventory_csv)
 matcher = FuzzyBookMatcher(
     inventory,
@@ -57,37 +56,26 @@ service = InquiryService(
 
 # ---- background worker ----
 # Meta requires a fast 200 on the webhook or it retries; extraction takes
-# seconds. So we ACK instantly and process on a worker thread. A stdlib
-# queue is deliberate: no Redis/Celery on a $5 box. Trade-off: messages
-# still in the queue are lost on restart (senders can simply resend).
-_jobs: "queue.Queue[dict]" = queue.Queue()
+# seconds. We use a ThreadPoolExecutor to process multiple messages concurrently.
+# Trade-off: jobs in memory are lost on restart. For extreme scale, use Redis.
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
-
-def _worker() -> None:
-    while True:
-        raw = _jobs.get()
-        try:
-            msg = to_incoming(raw, whatsapp)
-            if msg is None:
-                continue  # statuses, reactions, audio... ignore quietly
-            service.handle_message(msg)
-        except Exception:
-            log.exception("Failed processing message %s", raw.get("id"))
-        finally:
-            _jobs.task_done()
-
-
-threading.Thread(target=_worker, daemon=True, name="inquiry-worker").start()
+def _process_job(raw: dict) -> None:
+    try:
+        msg = to_incoming(raw, whatsapp)
+        if msg is None:
+            return  # statuses, reactions, audio... ignore quietly
+        service.handle_message(msg)
+    except Exception:
+        log.exception("Failed processing message %s", raw.get("id"))
 
 # ---- app ----
 app = FastAPI(title="Bookstore Quote Bot", docs_url=None, redoc_url=None)
 app.include_router(build_router(service, store, settings))
 
-
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "inventory_items": len(inventory.all_items()), **store.stats()}
-
 
 @app.get("/webhook")
 def verify(request: Request) -> Response:
@@ -100,11 +88,10 @@ def verify(request: Request) -> Response:
         return Response(content=params.get("hub.challenge", ""), media_type="text/plain")
     return Response(status_code=403)
 
-
 @app.post("/webhook")
 async def receive(request: Request) -> dict:
     payload = await request.json()
     for raw in parse_webhook(payload):
         if store.mark_seen(raw.get("id", "")):  # dedup Meta's redeliveries
-            _jobs.put(raw)
+            _executor.submit(_process_job, raw)
     return {"status": "queued"}  # always 200, always fast

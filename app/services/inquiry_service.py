@@ -19,7 +19,11 @@ from app.domain.models import (
     IncomingMessage,
     Inquiry,
     InquiryStatus,
+    InventoryItem,
+    ManualReviewSubmission,
     MediaKind,
+    Quote,
+    QuoteLine,
 )
 from app.services.quote_service import QuoteBuilder
 from app.services.pdf_service import PdfGenerator
@@ -94,7 +98,7 @@ class InquiryService:
             # Intercept the confirmation command
             if text_content.upper() == "YES":
                 recent_quote = self._store.get_latest_quoted(message.sender)
-                if recent_quote and recent_quote.quote:
+                if recent_quote and (recent_quote.quote or recent_quote.revised_quote):
                     recent_quote.status = InquiryStatus.CONFIRMED
                     self._store.save(recent_quote)
                     
@@ -104,7 +108,9 @@ class InquiryService:
                     )
                     
                     try:
-                        pdf_bytes = self._pdf_generator.generate_quote_pdf(recent_quote, recent_quote.quote)
+                        # Use revised_quote if it exists, otherwise fall back to original quote
+                        active_quote = recent_quote.revised_quote or recent_quote.quote
+                        pdf_bytes = self._pdf_generator.generate_quote_pdf(recent_quote, active_quote)
                         self._messenger.send_document(
                             to=message.sender,
                             document_bytes=pdf_bytes,
@@ -172,25 +178,40 @@ class InquiryService:
     # ---- review path (dashboard actions) ----
 
     def approve(self, inquiry_id: str, corrections: dict[int, str | None]) -> Inquiry:
-        """Apply human corrections and send the quote.
-
-        corrections: {line_index: sku_or_None} - None marks the line
-        as genuinely unavailable ("not found").
-        Lines not present in `corrections` keep their best match.
-        """
+        """Apply human corrections and send the quote."""
         inquiry = self._store.get(inquiry_id)
         if inquiry is None:
             raise KeyError(inquiry_id)
         if inquiry.quote is None:
             raise ValueError(f"Inquiry {inquiry_id} has no quote to approve")
 
-        from app.domain.models import QuoteLine  # local to avoid cycle noise
-
         new_lines: list[QuoteLine] = []
         for idx, line in enumerate(inquiry.quote.lines):
             if idx in corrections:
-                sku = corrections[idx]
-                matched = self._lookup(inquiry, sku) if sku else None
+                sku_or_custom = corrections[idx]
+                
+                if not sku_or_custom:
+                    matched = None
+                elif sku_or_custom.startswith("CUSTOM::"):
+                    # Unpack the contract from routes.py
+                    parts = sku_or_custom.split("::")
+                    custom_title = parts[1]
+                    try:
+                        custom_price = float(parts[2])
+                    except ValueError:
+                        custom_price = 0.0
+                        
+                    matched = InventoryItem(
+                        sku=f"manual-override-{idx}",
+                        title=custom_title,
+                        author_or_publisher="Manual Entry",
+                        price=custom_price,
+                        stock=999,
+                    )
+                else:
+                    # Proceed with normal CSV/DB SKU lookup
+                    matched = self._lookup(inquiry, sku_or_custom)
+
                 new_lines.append(
                     QuoteLine(
                         requested_title=line.requested_title,
@@ -201,12 +222,51 @@ class InquiryService:
                 )
             else:
                 new_lines.append(line)
-        inquiry.quote.lines = new_lines
-
-        body = self._renderer.render(inquiry, inquiry.quote)
-        self._messenger.send_text(inquiry.sender, body)
+        
+        # Preserve original AI quote, assign updates to revised_quote
+        revised_quote = Quote(lines=new_lines)
+        inquiry.revised_quote = revised_quote
         inquiry.status = InquiryStatus.QUOTED_MANUAL
+        
         self._store.save(inquiry)
+
+        body = self._renderer.render(inquiry, revised_quote)
+        self._messenger.send_text(inquiry.sender, body)
+        return inquiry
+
+    def approve_manual_override(self, inquiry_id: str, payload: ManualReviewSubmission) -> Inquiry:
+        """Processes full manual edits from the dashboard, bypassing the original matcher."""
+        inquiry = self._store.get(inquiry_id)
+        if not inquiry:
+            raise KeyError(f"Inquiry {inquiry_id} not found")
+
+        revised_lines: list[QuoteLine] = []
+        for line_item in payload.lines:
+            item = InventoryItem(
+                sku=line_item.sku,
+                title=line_item.title,
+                author_or_publisher="Manual Entry",
+                price=line_item.override_price,
+                stock=999,  
+            )
+            
+            line = QuoteLine(
+                requested_title=line_item.title,
+                quantity=line_item.quantity,
+                matched=item,
+                confidence=100.0,
+            )
+            revised_lines.append(line)
+
+        revised_quote = Quote(lines=revised_lines)
+        inquiry.revised_quote = revised_quote
+        inquiry.status = InquiryStatus.QUOTED_MANUAL
+
+        self._store.save(inquiry)
+
+        message_text = self._renderer.render(inquiry, revised_quote)
+        self._messenger.send_text(inquiry.sender, message_text)
+
         return inquiry
 
     # ---- internals ----

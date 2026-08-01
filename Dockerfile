@@ -17,5 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Ensure the data directory exists even if the bind mount hasn't been set up yet
+RUN mkdir -p /srv/data
+
 # Railway injects $PORT; default 8000 for plain Docker/VPS
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
-
+from pydantic import BaseModel
 
 class MediaKind(str, Enum):
     TEXT = "text"
@@ -123,4 +123,14 @@ class Inquiry:
     extracted: list[ExtractedBook] = field(default_factory=list)
     matches: list[MatchResult] = field(default_factory=list)
     quote: Optional[Quote] = None
+    revised_quote: Optional[Quote] = None
     error: Optional[str] = None
+
+class DashboardLineItem(BaseModel):
+    sku: str
+    title: str
+    quantity: int
+    override_price: float
+
+class ManualReviewSubmission(BaseModel):
+    lines: list[DashboardLineItem]

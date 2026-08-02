@@ -100,11 +100,37 @@ class PostgresInquiryStore:
             payload = session.execute(stmt).scalar_one_or_none()
             return _deserialize(payload) if payload else None
 
+    def get_awaiting_payment(self, sender: str) -> Optional[Inquiry]:
+        """Fetches the active inquiry if the user is currently expected to send a payment receipt."""
+        with self._conn() as session:
+            stmt = (
+                select(InquiryModel.payload)
+                .where(
+                    InquiryModel.sender == sender,
+                    InquiryModel.status == InquiryStatus.AWAITING_PAYMENT.value,
+                )
+                .order_by(InquiryModel.created_at.desc())
+                .limit(1)
+            )
+            payload = session.execute(stmt).scalar_one_or_none()
+            return _deserialize(payload) if payload else None
+
     def pending_review(self) -> list[Inquiry]:
         with self._conn() as session:
             stmt = (
                 select(InquiryModel.payload)
                 .where(InquiryModel.status == InquiryStatus.NEEDS_REVIEW.value)
+                .order_by(InquiryModel.created_at.asc())
+            )
+            payloads = session.execute(stmt).scalars().all()
+            return [_deserialize(p) for p in payloads]
+
+    def pending_payments(self) -> list[Inquiry]:
+        """Fetches orders where the customer has submitted payment proof."""
+        with self._conn() as session:
+            stmt = (
+                select(InquiryModel.payload)
+                .where(InquiryModel.status == InquiryStatus.NEEDS_PAYMENT_REVIEW.value)
                 .order_by(InquiryModel.created_at.asc())
             )
             payloads = session.execute(stmt).scalars().all()

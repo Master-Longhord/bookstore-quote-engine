@@ -28,6 +28,7 @@ from app.config import load_settings
 from app.review.routes import build_router
 from app.services.inquiry_service import InquiryService
 from app.services.quote_service import WhatsAppQuoteRenderer
+from app.services.faq_service import process_faq
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("bookstore")
@@ -69,6 +70,12 @@ def _process_job(raw: dict) -> None:
             return
         
         log.info("Parsed message from %s: '%s'", msg.sender, msg.text)
+        
+        # Intercept FAQs before running the heavy Claude extraction pipeline
+        if msg.text and process_faq(msg.text, msg.sender, whatsapp):
+            log.info("Message handled by FAQ service. Skipping extraction.")
+            return
+
         service.handle_message(msg)
         log.info("Message handled successfully.")
     except Exception:

@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 import time
 from pydantic import BaseModel
 from app.services.quote_service import jmd
+from app.domain.models import InquiryStatus
 
 class ClaimRequest(BaseModel):
     token: str
@@ -25,6 +26,7 @@ def build_router(service, store, settings) -> APIRouter:
     @router.get("/review", response_class=HTMLResponse)
     def review_page(request: Request, _=Depends(auth)):
         pending = store.pending_review()
+        pending_payments = store.pending_payments()
         stats = store.stats()
         
         return templates.TemplateResponse(
@@ -32,6 +34,7 @@ def build_router(service, store, settings) -> APIRouter:
             name="review.html",
             context={
                 "pending": pending,
+                "pending_payments": pending_payments,
                 "stats": stats,
                 "token": settings.admin_token,
                 "jmd": jmd
@@ -64,12 +67,10 @@ def build_router(service, store, settings) -> APIRouter:
         
         now = time.time()
         
-        # Reject if claimed by someone else and the 5-minute (300s) TTL is still active
         if inquiry.claimed_by and inquiry.claimed_by != payload.token:
             if inquiry.claimed_at and (now - inquiry.claimed_at) < 300:
                 raise HTTPException(status_code=409, detail="Currently locked by another user")
                 
-        # Grant or refresh the claim
         inquiry.claimed_by = payload.token
         inquiry.claimed_at = now
         store.save(inquiry)
@@ -81,7 +82,6 @@ def build_router(service, store, settings) -> APIRouter:
         if not inquiry:
             raise HTTPException(status_code=404)
             
-        # Only the person who owns the lock can release it early
         if inquiry.claimed_by == payload.token:
             inquiry.claimed_by = None
             inquiry.claimed_at = None
@@ -89,12 +89,11 @@ def build_router(service, store, settings) -> APIRouter:
             
         return {"status": "unclaimed"}
 
-    # ---- Existing Approval Endpoint (Updated with Lock Validation) ----
+    # ---- Existing Approval Endpoint ----
     @router.post("/review/{inquiry_id}/approve")
     async def approve(inquiry_id: str, request: Request, _=Depends(auth)):
         form = await request.form()
         
-        # 1. Fetch inquiry and validate lock before doing any processing
         inquiry = store.get(inquiry_id)
         if not inquiry:
             raise HTTPException(status_code=404, detail="Inquiry not found")
@@ -102,32 +101,24 @@ def build_router(service, store, settings) -> APIRouter:
         client_token = form.get("reviewer_token")
         now = time.time()
         
-        # If someone else owns the lock and it hasn't expired, reject the submission
         if inquiry.claimed_by and inquiry.claimed_by != client_token:
             if inquiry.claimed_at and (now - inquiry.claimed_at) < 300:
                 raise HTTPException(status_code=403, detail="Cannot approve. Locked by another user.")
         
-        # 2. Process form data
         corrections: dict[int, str | None] = {}
         
         for key, value in form.items():
-            # Handle standard SKU selection from the dropdown
             if key.startswith("line-"):
                 idx = int(key.removeprefix("line-"))
                 corrections[idx] = value or None
                 
-            # Handle manual text and price inputs
             elif key.startswith("manual_title-"):
                 idx = int(key.removeprefix("manual_title-"))
                 title = value.strip()
                 
-                # Only process if they actually typed a title
                 if title:
-                    # Fetch the corresponding price, defaulting to "0" if empty
                     price_str = form.get(f"manual_price-{idx}", "0").strip()
                     price = price_str if price_str else "0"
-                    
-                    # Encode the data into our strict contract format
                     corrections[idx] = f"CUSTOM::{title}::{price}"
 
         try:
@@ -138,5 +129,42 @@ def build_router(service, store, settings) -> APIRouter:
         return RedirectResponse(
             url=f"/review?token={settings.admin_token}", status_code=303
         )
-    
+
+    # ---- NEW: Payment Confirmation Endpoint ----
+    @router.post("/review/{inquiry_id}/confirm_payment")
+    def confirm_payment(inquiry_id: str, _=Depends(auth)):
+        """Verifies payment, updates state, and sends the final PDF receipt."""
+        inquiry = store.get(inquiry_id)
+        if not inquiry:
+            raise HTTPException(status_code=404, detail="Inquiry not found")
+            
+        inquiry.status = InquiryStatus.CONFIRMED
+        store.save(inquiry)
+
+        try:
+            active_quote = inquiry.revised_quote or inquiry.quote
+            pdf_bytes = service._pdf_generator.generate_quote_pdf(inquiry, active_quote)
+            
+            service._messenger.send_text(
+                inquiry.sender,
+                "Payment received! Thank you. Your final receipt is attached below. Your order is now being processed for delivery."
+            )
+            
+            service._messenger.send_document(
+                to=inquiry.sender,
+                document_bytes=pdf_bytes,
+                filename=f"Receipt_{inquiry.id[:8]}.pdf"
+            )
+        except Exception as exc:
+            # If the PDF generation fails, we still want the order to be confirmed in the DB
+            print(f"Failed to generate/send PDF for {inquiry.id}: {exc}")
+            service._messenger.send_text(
+                inquiry.sender,
+                "Payment received! We had a slight error generating your PDF receipt, but your order is fully confirmed and processing."
+            )
+            
+        return RedirectResponse(
+            url=f"/review?token={settings.admin_token}", status_code=303
+        )
+
     return router

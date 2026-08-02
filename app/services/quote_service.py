@@ -28,7 +28,7 @@ class QuoteBuilder:
 
 
 class WhatsAppQuoteRenderer:
-    def __init__(self, store_name: str = "our bookstore"):
+    def __init__(self, store_name: str = "BookDepot"):
         self._store_name = store_name
 
     def render(self, inquiry: Inquiry, quote: Quote) -> str:

@@ -47,7 +47,7 @@ class InventoryItem:
     sku: str
     title: str
     author_or_publisher: str
-    price: float                    # in Naira
+    price: float                    # in JMD
     stock: int
 
     @property
@@ -109,6 +109,8 @@ class InquiryStatus(str, Enum):
     QUOTED_AUTO = "quoted_auto"          # quote sent automatically
     NEEDS_REVIEW = "needs_review"        # waiting for a human in the dashboard
     QUOTED_MANUAL = "quoted_manual"      # human approved & sent
+    AWAITING_PAYMENT = "awaiting_payment" # waiting for customer to send receipt
+    NEEDS_PAYMENT_REVIEW = "needs_payment_review" # employee must verify bank alert
     CONFIRMED = "confirmed"              # user replied YES
     FAILED = "failed"
 
@@ -131,6 +133,9 @@ class Inquiry:
     # Claim state for concurrent reviews
     claimed_by: Optional[str] = None
     claimed_at: Optional[float] = None
+    
+    # Storage for payment verification
+    payment_receipt_base64: Optional[str] = None
 
 
 class DashboardLineItem(BaseModel):

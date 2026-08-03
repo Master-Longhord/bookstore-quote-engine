@@ -84,6 +84,22 @@ class SqliteInquiryStore:
             ).fetchone()
         return _deserialize(json.loads(row["payload"])) if row else None
     
+    def get_awaiting_payment(self, sender: str) -> Optional[Inquiry]:
+        """Fetches the active inquiry if the user is currently expected to send a payment receipt."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT payload FROM inquiries "
+                "WHERE sender=? AND status IN (?, ?) "
+                "ORDER BY created_at DESC",
+                (sender, InquiryStatus.QUOTED_AUTO.value, InquiryStatus.QUOTED_MANUAL.value)
+            ).fetchall()
+            
+        for r in rows:
+            inq = _deserialize(json.loads(r["payload"]))
+            if inq.payment_status == PaymentStatus.PENDING:
+                return inq
+        return None
+    
     def pending_review(self) -> list[Inquiry]:
         with self._conn() as c:
             rows = c.execute(
@@ -93,7 +109,7 @@ class SqliteInquiryStore:
         return [_deserialize(json.loads(r["payload"])) for r in rows]
 
     def pending_payments(self) -> list[Inquiry]:
-        """Fetches inquiries that are awaiting payment verification."""
+        """Fetches inquiries that are processing payment verification."""
         with self._conn() as c:
             # Fetch quotes that have been sent out and are active
             rows = c.execute(
@@ -104,7 +120,8 @@ class SqliteInquiryStore:
         results = []
         for r in rows:
             inq = _deserialize(json.loads(r["payload"]))
-            if inq.payment_status in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+            # CHANGE: Only return PROCESSING. Do not return PENDING.
+            if inq.payment_status == PaymentStatus.PROCESSING:
                 results.append(inq)
                 
         return results

@@ -159,7 +159,7 @@ class PostgresInquiryStore:
             return [_deserialize(p) for p in payloads]
 
     def pending_payments(self) -> list[Inquiry]:
-        """Fetches orders where the quote is sent and payment is awaiting or processing verification."""
+        """Fetches orders where the quote is sent and payment is processing verification."""
         valid_statuses = [
             InquiryStatus.QUOTED_AUTO.value,
             InquiryStatus.QUOTED_MANUAL.value,
@@ -175,7 +175,8 @@ class PostgresInquiryStore:
             results = []
             for p in payloads:
                 inq = _deserialize(p)
-                if inq.payment_status in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+                # CHANGE: Only return PROCESSING. Do not return PENDING.
+                if inq.payment_status == PaymentStatus.PROCESSING:
                     results.append(inq)
             return results
 

@@ -109,10 +109,15 @@ class InquiryStatus(str, Enum):
     QUOTED_AUTO = "quoted_auto"          # quote sent automatically
     NEEDS_REVIEW = "needs_review"        # waiting for a human in the dashboard
     QUOTED_MANUAL = "quoted_manual"      # human approved & sent
-    AWAITING_PAYMENT = "awaiting_payment" # waiting for customer to send receipt
-    NEEDS_PAYMENT_REVIEW = "needs_payment_review" # employee must verify bank alert
     CONFIRMED = "confirmed"              # user replied YES
     FAILED = "failed"
+
+
+class PaymentStatus(str, Enum):
+    PENDING = "pending"                  # Quote sent, waiting for customer upload
+    PROCESSING = "processing"            # Uploaded, locked by admin for verification
+    COMPLETED = "completed"              # Admin confirmed payment
+    FAILED = "failed"                    # Fake receipt or failed transfer
 
 
 @dataclass
@@ -130,12 +135,17 @@ class Inquiry:
     revised_quote: Optional[Quote] = None
     error: Optional[str] = None
     
-    # Claim state for concurrent reviews
+    # Claim state for concurrent quote reviews
     claimed_by: Optional[str] = None
     claimed_at: Optional[float] = None
     
-    # Storage for payment verification
+    # Storage and state for payment verification
     payment_receipt_base64: Optional[str] = None
+    payment_status: PaymentStatus = PaymentStatus.PENDING
+    
+    # Claim state for concurrent payment reviews
+    payment_claimed_by: Optional[str] = None
+    payment_claimed_at: Optional[float] = None
 
 
 class DashboardLineItem(BaseModel):
@@ -147,3 +157,4 @@ class DashboardLineItem(BaseModel):
 
 class ManualReviewSubmission(BaseModel):
     lines: list[DashboardLineItem]
+    

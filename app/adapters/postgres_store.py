@@ -6,6 +6,7 @@ allowing a friction-free drop-in replacement while providing Postgres stability.
 from __future__ import annotations
 
 import time
+import json
 from typing import Optional
 
 from sqlalchemy import Float, String, select, func, create_engine, update
@@ -13,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from app.adapters.sqlite_store import _deserialize, _serialize
-from app.domain.models import Inquiry, InquiryStatus
+from app.domain.models import Inquiry, InquiryStatus, PaymentStatus
 
 # ---- SQLAlchemy Models ----
 
@@ -127,18 +128,25 @@ class PostgresInquiryStore:
 
     def get_awaiting_payment(self, sender: str) -> Optional[Inquiry]:
         """Fetches the active inquiry if the user is currently expected to send a payment receipt."""
+        valid_statuses = [
+            InquiryStatus.QUOTED_AUTO.value,
+            InquiryStatus.QUOTED_MANUAL.value,
+        ]
         with self._conn() as session:
             stmt = (
                 select(InquiryModel.payload)
                 .where(
                     InquiryModel.sender == sender,
-                    InquiryModel.status == InquiryStatus.AWAITING_PAYMENT.value,
+                    InquiryModel.status.in_(valid_statuses),
                 )
                 .order_by(InquiryModel.created_at.desc())
-                .limit(1)
             )
-            payload = session.execute(stmt).scalar_one_or_none()
-            return _deserialize(payload) if payload else None
+            payloads = session.execute(stmt).scalars().all()
+            for payload in payloads:
+                inq = _deserialize(payload)
+                if inq.payment_status == PaymentStatus.PENDING:
+                    return inq
+            return None
 
     def pending_review(self) -> list[Inquiry]:
         with self._conn() as session:
@@ -151,15 +159,25 @@ class PostgresInquiryStore:
             return [_deserialize(p) for p in payloads]
 
     def pending_payments(self) -> list[Inquiry]:
-        """Fetches orders where the customer has submitted payment proof."""
+        """Fetches orders where the quote is sent and payment is awaiting or processing verification."""
+        valid_statuses = [
+            InquiryStatus.QUOTED_AUTO.value,
+            InquiryStatus.QUOTED_MANUAL.value,
+        ]
         with self._conn() as session:
             stmt = (
                 select(InquiryModel.payload)
-                .where(InquiryModel.status == InquiryStatus.NEEDS_PAYMENT_REVIEW.value)
+                .where(InquiryModel.status.in_(valid_statuses))
                 .order_by(InquiryModel.created_at.asc())
             )
             payloads = session.execute(stmt).scalars().all()
-            return [_deserialize(p) for p in payloads]
+            
+            results = []
+            for p in payloads:
+                inq = _deserialize(p)
+                if inq.payment_status in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+                    results.append(inq)
+            return results
 
     def stats(self) -> dict:
         with self._conn() as session:

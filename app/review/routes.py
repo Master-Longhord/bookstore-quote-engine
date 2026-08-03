@@ -5,7 +5,7 @@ from fastapi.templating import Jinja2Templates
 import time
 from pydantic import BaseModel
 from app.services.quote_service import jmd
-from app.domain.models import InquiryStatus
+from app.domain.models import InquiryStatus, PaymentStatus
 
 class ClaimRequest(BaseModel):
     token: str
@@ -45,17 +45,30 @@ def build_router(service, store, settings) -> APIRouter:
     @router.get("/review/api/pending")
     def get_pending_reviews(_=Depends(auth)):
         """Lightweight endpoint for frontend JS to poll the current claim status."""
-        inquiries = store.pending_review()
+        pending_quotes = store.pending_review()
+        pending_payments = store.pending_payments()
+        
+        locks = []
+        
+        # Map quote locks
+        for inq in pending_quotes:
+            locks.append({
+                "id": inq.id,
+                "claimed_by": inq.claimed_by,
+                "claimed_at": inq.claimed_at,
+            })
+            
+        # Map payment locks to the identical keys expected by the frontend JS
+        for inq in pending_payments:
+            locks.append({
+                "id": inq.id,
+                "claimed_by": inq.payment_claimed_by,
+                "claimed_at": inq.payment_claimed_at,
+            })
+            
         return {
             "server_time": time.time(),
-            "locks": [
-                {
-                    "id": inq.id,
-                    "claimed_by": inq.claimed_by,
-                    "claimed_at": inq.claimed_at,
-                }
-                for inq in inquiries
-            ]
+            "locks": locks
         }
 
     # ---- Lock Management Endpoints ----
@@ -66,13 +79,25 @@ def build_router(service, store, settings) -> APIRouter:
             raise HTTPException(status_code=404, detail="Inquiry not found")
         
         now = time.time()
+        is_quote_review = inquiry.status == InquiryStatus.NEEDS_REVIEW
         
-        if inquiry.claimed_by and inquiry.claimed_by != payload.token:
-            if inquiry.claimed_at and (now - inquiry.claimed_at) < 300:
+        current_owner = inquiry.claimed_by if is_quote_review else inquiry.payment_claimed_by
+        current_time = inquiry.claimed_at if is_quote_review else inquiry.payment_claimed_at
+        
+        # Verify lock
+        if current_owner and current_owner != payload.token:
+            if current_time and (now - current_time) < 300:
                 raise HTTPException(status_code=409, detail="Currently locked by another user")
                 
-        inquiry.claimed_by = payload.token
-        inquiry.claimed_at = now
+        # Apply lock to the correct lifecycle fields
+        if is_quote_review:
+            inquiry.claimed_by = payload.token
+            inquiry.claimed_at = now
+        else:
+            inquiry.payment_claimed_by = payload.token
+            inquiry.payment_claimed_at = now
+            inquiry.payment_status = PaymentStatus.PROCESSING
+            
         store.save(inquiry)
         return {"status": "claimed"}
 
@@ -82,10 +107,19 @@ def build_router(service, store, settings) -> APIRouter:
         if not inquiry:
             raise HTTPException(status_code=404)
             
-        if inquiry.claimed_by == payload.token:
-            inquiry.claimed_by = None
-            inquiry.claimed_at = None
-            store.save(inquiry)
+        is_quote_review = inquiry.status == InquiryStatus.NEEDS_REVIEW
+            
+        if is_quote_review:
+            if inquiry.claimed_by == payload.token:
+                inquiry.claimed_by = None
+                inquiry.claimed_at = None
+                store.save(inquiry)
+        else:
+            if inquiry.payment_claimed_by == payload.token:
+                inquiry.payment_claimed_by = None
+                inquiry.payment_claimed_at = None
+                inquiry.payment_status = PaymentStatus.PENDING
+                store.save(inquiry)
             
         return {"status": "unclaimed"}
 
@@ -132,13 +166,29 @@ def build_router(service, store, settings) -> APIRouter:
 
     # ---- NEW: Payment Confirmation Endpoint ----
     @router.post("/review/{inquiry_id}/confirm_payment")
-    def confirm_payment(inquiry_id: str, _=Depends(auth)):
-        """Verifies payment, updates state, and sends the final PDF receipt."""
+    async def confirm_payment(inquiry_id: str, request: Request, _=Depends(auth)):
+        """Verifies payment, enforces locks, updates state, and sends the final PDF receipt."""
+        form = await request.form()
+        
         inquiry = store.get(inquiry_id)
         if not inquiry:
             raise HTTPException(status_code=404, detail="Inquiry not found")
             
+        client_token = form.get("reviewer_token")
+        now = time.time()
+        
+        # Enforce payment locks to prevent duplicate submissions
+        if inquiry.payment_claimed_by and inquiry.payment_claimed_by != client_token:
+            if inquiry.payment_claimed_at and (now - inquiry.payment_claimed_at) < 300:
+                raise HTTPException(status_code=403, detail="Cannot approve. Locked by another user.")
+            
         inquiry.status = InquiryStatus.CONFIRMED
+        inquiry.payment_status = PaymentStatus.COMPLETED
+        
+        # Clear the lock since the review is complete
+        inquiry.payment_claimed_by = None
+        inquiry.payment_claimed_at = None
+        
         store.save(inquiry)
 
         try:
@@ -156,7 +206,6 @@ def build_router(service, store, settings) -> APIRouter:
                 filename=f"Receipt_{inquiry.id[:8]}.pdf"
             )
         except Exception as exc:
-            # If the PDF generation fails, we still want the order to be confirmed in the DB
             print(f"Failed to generate/send PDF for {inquiry.id}: {exc}")
             service._messenger.send_text(
                 inquiry.sender,
@@ -168,3 +217,4 @@ def build_router(service, store, settings) -> APIRouter:
         )
 
     return router
+    

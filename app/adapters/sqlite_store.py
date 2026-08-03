@@ -1,4 +1,4 @@
-"""InquiryStore backed by SQLite — perfect for a $5 VPS / Railway volume.
+"""InquiryStore backed by SQLite - perfect for a VPS or Railway volume.
 
 Inquiries are stored as a small set of indexed columns plus a JSON blob
 of the full domain object, so the schema never fights the domain model.
@@ -22,6 +22,7 @@ from app.domain.models import (
     MatchResult,
     Quote,
     QuoteLine,
+    PaymentStatus,
 )
 
 _SCHEMA = """
@@ -91,6 +92,23 @@ class SqliteInquiryStore:
             ).fetchall()
         return [_deserialize(json.loads(r["payload"])) for r in rows]
 
+    def pending_payments(self) -> list[Inquiry]:
+        """Fetches inquiries that are awaiting payment verification."""
+        with self._conn() as c:
+            # Fetch quotes that have been sent out and are active
+            rows = c.execute(
+                "SELECT payload FROM inquiries WHERE status IN (?, ?) ORDER BY created_at",
+                (InquiryStatus.QUOTED_AUTO.value, InquiryStatus.QUOTED_MANUAL.value)
+            ).fetchall()
+            
+        results = []
+        for r in rows:
+            inq = _deserialize(json.loads(r["payload"]))
+            if inq.payment_status in (PaymentStatus.PENDING, PaymentStatus.PROCESSING):
+                results.append(inq)
+                
+        return results
+
     def stats(self) -> dict:
         with self._conn() as c:
             rows = c.execute(
@@ -118,7 +136,11 @@ class SqliteInquiryStore:
 # ---- (de)serialization helpers ----
 
 def _serialize(inq: Inquiry) -> dict:
-    return asdict(inq) | {"status": inq.status.value}
+    # asdict catches all fields automatically, we only override Enums for JSON safety
+    return asdict(inq) | {
+        "status": inq.status.value,
+        "payment_status": inq.payment_status.value
+    }
 
 
 def _deserialize(d: dict) -> Inquiry:
@@ -165,6 +187,14 @@ def _deserialize(d: dict) -> Inquiry:
         quote=parse_quote(d.get("quote")),
         revised_quote=parse_quote(d.get("revised_quote")),
         error=d.get("error"),
+        
+        # Original Quote Locks
         claimed_by=d.get("claimed_by"),
         claimed_at=d.get("claimed_at"),
+        
+        # New Payment Fields
+        payment_receipt_base64=d.get("payment_receipt_base64"),
+        payment_status=PaymentStatus(d.get("payment_status", "pending")),
+        payment_claimed_by=d.get("payment_claimed_by"),
+        payment_claimed_at=d.get("payment_claimed_at"),
     )

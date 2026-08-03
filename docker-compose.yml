@@ -2,16 +2,17 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: bookstore-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: bookstore_admin
-      POSTGRES_PASSWORD: secure_password_here
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: bookstore
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bookstore_admin -d bookstore"]
+      test: [ "CMD-SHELL", "pg_isready -U bookstore_admin -d bookstore" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -19,6 +20,7 @@ services:
   app:
     build: .
     container_name: bookstore-app
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:

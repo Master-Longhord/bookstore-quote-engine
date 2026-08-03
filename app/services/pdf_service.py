@@ -19,10 +19,19 @@ _HTML_TEMPLATE = """
         th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
         th { background-color: #f9f9f9; }
         .total { font-weight: bold; font-size: 1.2em; text-align: right; margin-top: 20px; }
+        
+        /* Added footer styling */
+        .footer {
+            margin-top: 40px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333333;
+        }
     </style>
 </head>
 <body>
-    <h1>Quotation from Our Bookstore</h1>
+    <h1>Quotation from {{ store_name }}</h1>
     <p><strong>Customer:</strong> {{ customer_name }}</p>
     
     <table>
@@ -46,12 +55,20 @@ _HTML_TEMPLATE = """
         </tbody>
     </table>
     
+    <!-- Moved total above the footer -->
     <div class="total">Grand Total: {{ total }}</div>
+    
+    <div class="footer">
+        <p>Thank you for shopping with us!</p>
+    </div>
 </body>
 </html>
 """
 
 class PdfGenerator:
+    def __init__(self, store_name: str = "BookDepot"):
+        self._store_name = store_name
+
     def generate_quote_pdf(self, inquiry: Inquiry, quote: Quote) -> bytes:
         """Renders the quote as HTML, converts to PDF, and returns the raw bytes."""
         
@@ -69,6 +86,7 @@ class PdfGenerator:
         # 2. Render HTML
         template = Template(_HTML_TEMPLATE)
         html_content = template.render(
+            store_name=self._store_name,  # Injecting the dynamic store name
             customer_name=inquiry.sender_name or inquiry.sender,
             lines=lines_data,
             total=jmd(quote.total)

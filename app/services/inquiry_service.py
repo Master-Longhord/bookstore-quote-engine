@@ -37,7 +37,7 @@ UNSUPPORTED_REPLY = (
     "quote right away."
 )
 EMPTY_REPLY = (
-    "Welcome to the bookdepot! To get an instant quote, please send a "
+    "Welcome to the BookDepot! To get an instant quote, please send a "
     "clear photo, a PDF, or type out your school's book list.\n\n"
     "For the most accurate results when typing, please list each book on a new line like this:\n\n"
     "Example:\n"
@@ -77,7 +77,7 @@ class InquiryService:
 
     # ---- inbound path ----
 
-    def handle_message(self, message: IncomingMessage) -> Inquiry:
+    def handle_message(self, message: IncomingMessage, is_last_attempt: bool = False) -> Inquiry:
         
         # --- 1. PAYMENT INTERCEPTOR ---
         # Intercept messages if the customer is currently in the payment stage
@@ -169,14 +169,19 @@ class InquiryService:
         try:
             inquiry.extracted = self._extractor.extract(message)
             inquiry.status = InquiryStatus.EXTRACTED
-        except Exception as exc:  # extraction is the flaky boundary
-            log.exception("Extraction failed for %s", inquiry.id)
+        except Exception as exc: 
+            if not is_last_attempt:
+                # Bubble the error up to main.py so the queue triggers a retry
+                raise 
+                
+            # If we reach here, we have exhausted all retries. Fail gracefully.
+            log.exception("Extraction failed permanently for %s", inquiry.id)
             inquiry.status = InquiryStatus.FAILED
             inquiry.error = f"extraction: {exc}"
             self._store.save(inquiry)
             self._messenger.send_text(message.sender, ERROR_REPLY)
             return inquiry
-
+        
         if not inquiry.extracted:
             inquiry.status = InquiryStatus.FAILED
             inquiry.error = "no books found in message"
@@ -311,3 +316,4 @@ class InquiryService:
                 if c and c.item.sku == sku:
                     return c.item
         return None
+    

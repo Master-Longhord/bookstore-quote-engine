@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     # --- WhatsApp Cloud API ---
     wa_access_token: str
     wa_phone_number_id: str          
-    wa_verify_token: str = "change-me"             
+    wa_verify_token: str
+    wa_app_secret: str
 
     # --- Matching thresholds ---
     auto_send_threshold: float = 88.0       
@@ -23,10 +24,8 @@ class Settings(BaseSettings):
     database_url: str
 
     # --- Review dashboard ---
-    admin_token: str = "change-me-too"                 
+    admin_token: str                
 
-    # This configuration dictionary tells Pydantic to look for a .env file
-    # in the root directory and load it automatically.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

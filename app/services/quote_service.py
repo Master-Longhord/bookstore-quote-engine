@@ -53,6 +53,7 @@ class WhatsAppQuoteRenderer:
                 out.append(f"{n}. {item.title} - *out of stock*")
 
         out += ["", f"*Total: {jmd(quote.total)}*"]
+        out += ["*(Prices subject to change)*"]
 
         if quote.unmatched:
             out += [

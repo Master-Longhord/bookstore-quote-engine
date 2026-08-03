@@ -3,65 +3,49 @@
 FAQS = {
     "1": {
         "question": "What are your opening hours?",
-        "answer": "We are open From Monday to Saturday 7:30am to 5pm. We are open on Sundays during back-to-school periods (August to September). You can also call our office line to confirm."
+        "answer": "We are open Monday to Saturday from 7:30 a.m. to 6:00 p.m. We are open on Sundays from 10:00 a.m. to 4:00 p.m. during the Back-to-School season (August–September). Our opening hours on public holidays may vary. Please call (876) 619-8419 to confirm before visiting."
     },
     "2": {
-        "question": "What type of books do you sell / have available?",
-        "answer": "We provide a wide range of books, from Kindergarten to High School / Secondary Level."
+        "question": "What type of books do you sell?",
+        "answer": "We offer a wide range of educational books for students from Kindergarten through Secondary School, including textbooks, workbooks, readers, and other curriculum support materials."
     },
     "3": {
         "question": "Can I preorder a book that is currently out of stock?",
-        "answer": "No, but you can call our direct line to confirm the availability."
+        "answer": "Please call (876) 619-8419 and a representative will inform you if it can be specially ordered and provide you with the necessary details."
     },
     "4": {
         "question": "Do you offer payment plans?",
-        "answer": "Yes, but payment plans are only available in stores where customers can make payments while the books are reserved. They will be handed over once the balance is paid."
+        "answer": "Yes. To start a payment plan, you'll need to visit the store to make your deposit(s). Your books will be reserved until you complete your payments and will be released to you once the balance has been paid in full."
     },
     "5": {
-        "question": "Do you offer book wrapping on all books?",
-        "answer": "Free book wrapping is provided for Textbooks Only that are purchased from Book Depot."
+        "question": "Do you offer booking wrapping on all books?",
+        "answer": "Free book wrapping is available only for textbooks purchased from Book Depot. Other books are not eligible for complimentary book wrapping."
     },
     "6": {
         "question": "Do you accept book vouchers?",
-        "answer": "Yes, we do accept 'Book Depot' vouchers only."
+        "answer": "Yes, we do accept Book Depot gift vouchers only."
     },
     "7": {
-        "question": "Do you sell educational toys?",
-        "answer": "Yes, we do sell toys with most being educational."
+        "question": "Where is the store located?",
+        "answer": "Book depot is located at 38 Langston Road, Kingston 3, Vineyard Town."
     },
     "8": {
-        "question": "Where exactly is Book Depot located?",
-        "answer": "Book Depot is located at 38 Langston Road, Kingston 3, Vineyard Town. Our location is accurate on Google Maps."
+        "question": "What are your payment methods?",
+        "answer": "Our accepted Payment methods are:\n• Cash (In Store)\n• Debit/Credit Cards (In Store)\n• Bank Transfer\n• Zelle Payments"
     },
     "9": {
-        "question": "What are your payment methods?",
-        "answer": "Debit/Credit Card, Transfer, Cash (in store only), Cashapp, Zelle."
+        "question": "Can I collect my order in store without a receipt?",
+        "answer": "Please present your receipt or order confirmation when collecting your order. Orders will only be released upon verification."
     },
     "10": {
-        "question": "Can I collect my order in store without a receipt?",
-        "answer": "A receipt / order number MUST be provided before an order can be released."
-    },
-    "11": {
-        "question": "Do you offer discounts?",
-        "answer": "Yes, we offer discounts during selected promotional periods."
-    },
-    "12": {
-        "question": "How can I get a quote?",
-        "answer": "You can scan your book list on our website, and a quote will be generated."
-    },
-    "13": {
-        "question": "Do you deliver to areas outside of Kingston?",
-        "answer": "For out-of-town orders, delivery is done through Knutsford Express."
-    },
-    "14": {
         "question": "Do you offer printing?",
-        "answer": "Yes, we do offer printing services in store. You can contact our office line for more information."
+        "answer": "Yes, we offer in-store printing services. For more information about our available printing options please contact our office at (876) 619-8419."
     }
 }
 
 def get_faq_menu_text() -> str:
     """Generates the interactive menu text."""
-    menu = "Welcome to Book Depot! 📚\nPlease reply with a number (1 to 14) to get an instant answer, or send your book list to get a quote:\n\n"
+    menu = "Welcome to Book Depot! 📚\nPlease reply with a number (1 to 10) to get an instant answer, or send your book list to get a quote:\n\n"
     for key, data in FAQS.items():
         menu += f"{key}. {data['question']}\n"
     return menu
@@ -87,4 +71,3 @@ def process_faq(message_text: str, sender_phone: str, whatsapp_client) -> bool:
         return True
         
     return False
-        

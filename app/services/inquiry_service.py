@@ -110,6 +110,7 @@ class InquiryService:
                 
                 custom_bank_message = (
                     f"Order Ref: #{active_quote.id[:8]}\n"
+                    "*(Disclaimer: This is not an order)*\n"
                     f"Total Amount Due: *{formatted_total}*\n\n"
                     "Please make a transfer to the following account:\n"
                     "• Bank: National Commercial Bank\n"

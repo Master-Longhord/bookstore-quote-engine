@@ -21,15 +21,18 @@ import anthropic
 from app.domain.models import ExtractedBook, IncomingMessage, MediaKind
 
 _SYSTEM = (
-    "You extract book lists from Nigerian school booklists sent to a bookstore. "
+    "You extract structured lists of items from school supply requests sent to a bookstore. "
     "The input may be a photo of a printed or handwritten list, a PDF, or plain text. "
+    "The customer will ask for books, workbooks, and stationery (e.g., pens, pencils, geometry sets). "
     "Return ONLY a JSON array, no prose, no markdown fences. Each element: "
     '{"title": str, "author_or_publisher": str|null, "grade": str|null, "quantity": int}. '
-    "Rules: keep titles as written (do not invent authors); grade is the class the list "
-    "is for (e.g. 'Primary 4', 'JSS 2', 'SS 1') if stated anywhere on the document, "
-    "applied to every book on that list; quantity defaults to 1 unless the list says "
-    "otherwise; ignore non-book items (uniforms, fees, stationery) unless they are "
-    "clearly books/workbooks. If the document contains no book list, return []."
+    "Rules: "
+    "1. Extract EVERY book and stationery item. Do not ignore stationery. "
+    "2. Keep titles as written (do not invent authors or brands). "
+    "3. Pay strict attention to units for stationery (e.g., '1 pack of blue pens' -> title: 'pack of blue pens', quantity: 1). "
+    "4. 'grade' is the class the list is for if stated (e.g. 'Primary 4', 'JSS 2'), applied to all items. "
+    "5. Ignore uniforms and school fees. "
+    "If the document contains no relevant items, return []."
 )
 
 _FENCE = re.compile(r"^```(?:json)?|```$", re.MULTILINE)

@@ -103,3 +103,14 @@ docker build --no-cache -t bookstore-bot .
 docker stop bookstore-app
 docker logs -f bookstore-app
 docker rm bookstore-app
+
+
+docker compose up -d
+docker compose logs -f app
+docker compose down
+docker compose up -d --build
+docker compose build --no-cache
+docker compose up -d
+docker compose restart app
+
+docker exec -it bookstore-postgres psql -U bookstore_admin -d bookstore

@@ -128,6 +128,21 @@ def _deserialize(d: dict) -> Inquiry:
     def cand(x: Optional[dict]) -> Optional[MatchCandidate]:
         return MatchCandidate(item=item(x["item"]), score=x["score"]) if x else None
 
+    def parse_quote(q_dict: Optional[dict]) -> Optional[Quote]:
+        if not q_dict:
+            return None
+        return Quote(
+            lines=[
+                QuoteLine(
+                    requested_title=l["requested_title"],
+                    quantity=l["quantity"],
+                    matched=item(l.get("matched")),
+                    confidence=l["confidence"],
+                )
+                for l in q_dict["lines"]
+            ]
+        )
+
     extracted = [ExtractedBook(**b) for b in d.get("extracted", [])]
     matches = [
         MatchResult(
@@ -137,19 +152,7 @@ def _deserialize(d: dict) -> Inquiry:
         )
         for m in d.get("matches", [])
     ]
-    quote = None
-    if d.get("quote"):
-        quote = Quote(
-            lines=[
-                QuoteLine(
-                    requested_title=l["requested_title"],
-                    quantity=l["quantity"],
-                    matched=item(l.get("matched")),
-                    confidence=l["confidence"],
-                )
-                for l in d["quote"]["lines"]
-            ]
-        )
+    
     return Inquiry(
         id=d["id"],
         sender=d["sender"],
@@ -159,6 +162,9 @@ def _deserialize(d: dict) -> Inquiry:
         raw_text=d.get("raw_text"),
         extracted=extracted,
         matches=matches,
-        quote=quote,
+        quote=parse_quote(d.get("quote")),
+        revised_quote=parse_quote(d.get("revised_quote")),
         error=d.get("error"),
+        claimed_by=d.get("claimed_by"),
+        claimed_at=d.get("claimed_at"),
     )

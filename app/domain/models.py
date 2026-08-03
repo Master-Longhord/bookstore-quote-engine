@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+from pydantic import BaseModel
 
 
 class MediaKind(str, Enum):
@@ -46,7 +47,7 @@ class InventoryItem:
     sku: str
     title: str
     author_or_publisher: str
-    price: float                    # in Naira
+    price: float                    # in JMD
     stock: int
 
     @property
@@ -76,7 +77,7 @@ class QuoteLine:
     requested_title: str
     quantity: int
     matched: Optional[InventoryItem]        # None => "not found"
-    confidence: float                        # 0 when unmatched
+    confidence: float                       # 0 when unmatched
 
     @property
     def line_total(self) -> float:
@@ -108,8 +109,11 @@ class InquiryStatus(str, Enum):
     QUOTED_AUTO = "quoted_auto"          # quote sent automatically
     NEEDS_REVIEW = "needs_review"        # waiting for a human in the dashboard
     QUOTED_MANUAL = "quoted_manual"      # human approved & sent
+    AWAITING_PAYMENT = "awaiting_payment" # waiting for customer to send receipt
+    NEEDS_PAYMENT_REVIEW = "needs_payment_review" # employee must verify bank alert
     CONFIRMED = "confirmed"              # user replied YES
     FAILED = "failed"
+
 
 @dataclass
 class Inquiry:
@@ -123,4 +127,23 @@ class Inquiry:
     extracted: list[ExtractedBook] = field(default_factory=list)
     matches: list[MatchResult] = field(default_factory=list)
     quote: Optional[Quote] = None
+    revised_quote: Optional[Quote] = None
     error: Optional[str] = None
+    
+    # Claim state for concurrent reviews
+    claimed_by: Optional[str] = None
+    claimed_at: Optional[float] = None
+    
+    # Storage for payment verification
+    payment_receipt_base64: Optional[str] = None
+
+
+class DashboardLineItem(BaseModel):
+    sku: str
+    title: str
+    quantity: int
+    override_price: float
+
+
+class ManualReviewSubmission(BaseModel):
+    lines: list[DashboardLineItem]

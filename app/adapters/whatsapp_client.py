@@ -58,19 +58,38 @@ class WhatsAppClient:
                 log.error("WhatsApp send failed %s: %s", resp.status_code, resp.text)
                 resp.raise_for_status()
 
-    def send_template(self, to: str, template_name: str, lang: str = "en") -> None:
+    def send_template(
+        self,
+        to: str,
+        template_name: str,
+        lang: str = "en_US",
+        variables: list[str] | None = None,
+    ) -> None:
         """Business-initiated message. Outside WhatsApp's 24-hour customer
         service window you can ONLY send pre-approved template messages —
-        create one in Meta Business Manager first (e.g. 'booklist_resend').
+        create one in Meta Business Manager first.
         """
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": lang},
+            },
+        }
+
+        if variables:
+            payload["template"]["components"] = [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": val} for val in variables],
+                }
+            ]
+
         resp = self._http.post(
             f"{GRAPH}/{self._phone_id}/messages",
-            json={
-                "messaging_product": "whatsapp",
-                "to": to,
-                "type": "template",
-                "template": {"name": template_name, "language": {"code": lang}},
-            },
+            json=payload,
         )
         if resp.status_code >= 400:
             log.error("Template send failed %s: %s", resp.status_code, resp.text)
@@ -123,7 +142,6 @@ class WhatsAppClient:
         if send_resp.status_code >= 400:
             log.error("Document send failed %s: %s", send_resp.status_code, send_resp.text)
             send_resp.raise_for_status()
-
 
     # ---- inbound media ----
 

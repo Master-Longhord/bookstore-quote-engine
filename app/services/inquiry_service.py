@@ -48,6 +48,7 @@ EMPTY_REPLY = (
     "First Steps in Reading Book 1\n"
     "Integrated Science for Jamaica Grade 7\n"
     "Primary Mathematics (Qty: 2)"
+    "*(If you have a specific question not covered by our menu, please contact our office at (876) 619-8419 for further assistance!)*"
 )
 REVIEW_REPLY = (
     "Thank you{name}! We've received your book list. A member of our "

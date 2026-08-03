@@ -51,12 +51,32 @@
       color: white;
     }
 
+    /* Updated Payment Buttons styling */
+    .payment-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .payment-actions button {
+      margin: 0;
+      /* Remove default margin for flex layout */
+      font-size: 1.1em;
+      padding: 0.8rem;
+    }
+
     .btn-confirm-payment {
       background-color: #28a745;
       color: white;
-      width: 100%;
-      font-size: 1.1em;
-      padding: 0.8rem;
+      flex: 2;
+      /* Takes up 2/3 of the space */
+    }
+
+    .btn-decline-payment {
+      background-color: #dc3545;
+      color: white;
+      flex: 1;
+      /* Takes up 1/3 of the space */
     }
 
     .stats {
@@ -281,7 +301,6 @@
     {% for inq in pending_payments %}
     <div class="payment-card" id="container-{{ inq.id }}">
 
-      <!-- Added the same status banner to payments so the JS logic works here too -->
       <div class="status-banner">
         <span class="badge badge-unclaimed" id="badge-{{ inq.id }}">Loading status...</span>
         <button type="button" class="btn-claim" id="btn-claim-{{ inq.id }}" onclick="claimInquiry('{{ inq.id }}')"
@@ -315,7 +334,12 @@
           <p><em>No image uploaded. Please verify using the customer note and your bank alerts.</em></p>
           {% endif %}
 
-          <button class="btn-confirm-payment" type="submit">Confirm Payment & Send PDF Receipt</button>
+          <!-- Dual Submission Buttons using formaction -->
+          <div class="payment-actions">
+            <button class="btn-confirm-payment" type="submit">Confirm Payment & Send PDF Receipt</button>
+            <button class="btn-decline-payment" type="submit"
+              formaction="/review/{{ inq.id }}/decline_payment?token={{ token }}">Decline</button>
+          </div>
         </fieldset>
       </form>
     </div>

@@ -216,5 +216,41 @@ def build_router(service, store, settings) -> APIRouter:
             url=f"/review?token={settings.admin_token}", status_code=303
         )
 
+    @router.post("/review/{inquiry_id}/decline_payment")
+    async def decline_payment(inquiry_id: str, request: Request, _=Depends(auth)):
+        """Rejects the payment, reverts state to PENDING, and notifies the customer."""
+        form = await request.form()
+        
+        inquiry = store.get(inquiry_id)
+        if not inquiry:
+            raise HTTPException(status_code=404, detail="Inquiry not found")
+            
+        client_token = form.get("reviewer_token")
+        now = time.time()
+        
+        # Enforce payment locks
+        if inquiry.payment_claimed_by and inquiry.payment_claimed_by != client_token:
+            if inquiry.payment_claimed_at and (now - inquiry.payment_claimed_at) < 300:
+                raise HTTPException(status_code=403, detail="Cannot decline. Locked by another user.")
+                
+        # Revert the payment status so the interceptor can catch a new upload
+        inquiry.payment_status = PaymentStatus.PENDING
+        
+        # Clear the lock
+        inquiry.payment_claimed_by = None
+        inquiry.payment_claimed_at = None
+        
+        store.save(inquiry)
+
+        # Notify the user
+        service._messenger.send_text(
+            inquiry.sender,
+            "We were unable to verify your payment using the receipt provided. Please ensure the image is clear, the amount matches the quote, and upload it again."
+        )
+            
+        return RedirectResponse(
+            url=f"/review?token={settings.admin_token}", status_code=303
+        )
+
     return router
     

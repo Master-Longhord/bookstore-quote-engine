@@ -39,7 +39,7 @@ _HTML_TEMPLATE = """
         {% if logo_base64 %}
         <img class="logo" src="data:image/png;base64,{{ logo_base64 }}" alt="Book Depot Logo">
         {% endif %}
-        <h1>Quotation ** {{ store_name }}</h1>
+        <h1>Reciept From ** {{ store_name }}</h1>
     </div>
     <p><strong>Customer:</strong> {{ customer_name }}</p>
     

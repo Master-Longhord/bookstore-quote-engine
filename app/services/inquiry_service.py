@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 
 from app.domain.interfaces import (
     BookMatcher,
     DocumentExtractor,
     InquiryStore,
+    InventoryRepository,
     MessagingClient,
     QuoteRenderer,
 )
 from app.domain.models import (
+    ExtractedBook,
     IncomingMessage,
     Inquiry,
     InquiryStatus,
@@ -63,6 +66,7 @@ class InquiryService:
         extractor: DocumentExtractor,
         matcher: BookMatcher,
         store: InquiryStore,
+        inventory: InventoryRepository,
         messenger: MessagingClient,
         renderer: QuoteRenderer,
         auto_send_threshold: float,
@@ -70,6 +74,7 @@ class InquiryService:
         self._extractor = extractor
         self._matcher = matcher
         self._store = store
+        self._inventory = inventory
         self._messenger = messenger
         self._renderer = renderer
         self._builder = QuoteBuilder()
@@ -87,7 +92,18 @@ class InquiryService:
         
         if active_quote and active_quote.payment_status == PaymentStatus.PENDING:
             
-            # Scenario A: Customer replies "YES" to receive bank details
+            # Scenario A: Customer explicitly cancels the quote
+            if upper_text in ("NO", "CANCEL", "STOP"):
+                active_quote.status = InquiryStatus.FAILED
+                active_quote.error = "cancelled by user"
+                self._store.save(active_quote)
+                self._messenger.send_text(
+                    message.sender, 
+                    "Quote cancelled. You can send a new book list whenever you're ready!"
+                )
+                return active_quote
+
+            # Scenario B: Customer confirms they want to pay
             if upper_text == "YES":
                 active_quote_data = active_quote.revised_quote or active_quote.quote
                 formatted_total = f"J${active_quote_data.total:,.2f}"
@@ -103,32 +119,41 @@ class InquiryService:
                     "• Account Name: Book Depot Limited\n\n"
                     f"Once paid, please reply with the ACCOUNT NAME you transferred from and the AMOUNT sent, or upload a screenshot of your receipt. Please include your Order Ref (*#{active_quote.id[:8]}*)."
                 )
+                
+                # Hidden state trick: mark that they have initiated payment
+                active_quote.raw_text = (active_quote.raw_text or "") + "\n[AWAITING_RECEIPT]"
+                self._store.save(active_quote)
                 self._messenger.send_text(message.sender, custom_bank_message)
                 return active_quote
 
-            # Scenario B: Customer uploads a receipt (image/pdf) or sends a transaction note
-            # We ignore simple short texts like "ok", "hi", "thanks" so they do not trigger a fake payment
-            is_valid_note = len(text_content) > 5 and upper_text not in ("HELLO", "THANKS", "THANK YOU", "OKAY", "SURE")
+            # Scenario C: Catching the actual receipt (ONLY if they previously said YES)
+            is_awaiting_receipt = "[AWAITING_RECEIPT]" in (active_quote.raw_text or "")
             
-            if message.media_bytes or is_valid_note:
-                active_quote.payment_status = PaymentStatus.PROCESSING
+            if is_awaiting_receipt:
+                is_valid_note = len(text_content) > 5 and upper_text not in ("HELLO", "THANKS", "THANK YOU", "OKAY", "SURE")
                 
-                if message.media_bytes:
-                    encoded = base64.b64encode(message.media_bytes).decode("utf-8")
-                    mime_type = message.media_mime or "image/jpeg"
-                    active_quote.payment_receipt_base64 = f"data:{mime_type};base64,{encoded}"
-                
-                if text_content:
-                    note = f"\n[Payment Note: {text_content}]"
-                    active_quote.raw_text = (active_quote.raw_text or "") + note
+                if message.media_bytes or is_valid_note:
+                    active_quote.payment_status = PaymentStatus.PROCESSING
                     
-                self._store.save(active_quote)
-                
-                self._messenger.send_text(
-                    message.sender,
-                    "Thank you! We have received your payment submission. Our team will verify it shortly and process your final receipt."
-                )
-                return active_quote
+                    if message.media_bytes:
+                        encoded = base64.b64encode(message.media_bytes).decode("utf-8")
+                        mime_type = message.media_mime or "image/jpeg"
+                        active_quote.payment_receipt_base64 = f"data:{mime_type};base64,{encoded}"
+                    
+                    if text_content:
+                        note = f"\n[Payment Note: {text_content}]"
+                        active_quote.raw_text = (active_quote.raw_text or "") + note
+                        
+                    self._store.save(active_quote)
+                    
+                    self._messenger.send_text(
+                        message.sender,
+                        "Thank you! We have received your payment submission. Our team will verify it shortly and process your final receipt."
+                    )
+                    return active_quote
+            
+            # If they have a pending quote but just sent an image/text without saying YES or NO,
+            # we simply do nothing here. The code will fall through to Step 2 and treat it as a new book list.
 
 
         # --- 2. NORMAL NEW INQUIRY PATH ---
@@ -222,13 +247,25 @@ class InquiryService:
                     except ValueError:
                         custom_price = 0.0
                         
-                    matched = InventoryItem(
-                        sku=f"manual-override-{idx}",
-                        title=custom_title,
-                        author_or_publisher="Manual Entry",
-                        price=custom_price,
-                        stock=999,
-                    )
+                    # --- QUARANTINE ZONE: Matcher Check & Save ---
+                    dummy_req = ExtractedBook(title=custom_title, quantity=1)
+                    match_res = self._matcher.match(dummy_req)
+                    
+                    if match_res.best and match_res.best.score >= 95.0:
+                        # Found a near-perfect match in the database already, link it
+                        matched = match_res.best.item
+                    else:
+                        # Truly missing. Create AUTO-ADD SKU and save it.
+                        auto_sku = f"AUTO-ADD-{int(time.time())}-{idx}"
+                        matched = InventoryItem(
+                            sku=auto_sku,
+                            title=custom_title,
+                            author_or_publisher="Manual Entry",
+                            price=custom_price,
+                            stock=999,
+                        )
+                        self._inventory.add_item(matched)
+                    # ---------------------------------------------
                 else:
                     # Proceed with normal CSV/DB SKU lookup
                     matched = self._lookup(inquiry, sku_or_custom)
@@ -262,14 +299,35 @@ class InquiryService:
             raise KeyError(f"Inquiry {inquiry_id} not found")
 
         revised_lines: list[QuoteLine] = []
-        for line_item in payload.lines:
-            item = InventoryItem(
-                sku=line_item.sku,
-                title=line_item.title,
-                author_or_publisher="Manual Entry",
-                price=line_item.override_price,
-                stock=999,  
-            )
+        for idx, line_item in enumerate(payload.lines):
+            sku = line_item.sku
+            
+            # If SKU is empty or explicitly custom, process via Quarantine Zone
+            if not sku or sku.startswith("manual-override") or sku.startswith("CUSTOM"):
+                dummy_req = ExtractedBook(title=line_item.title, quantity=1)
+                match_res = self._matcher.match(dummy_req)
+                
+                if match_res.best and match_res.best.score >= 95.0:
+                    item = match_res.best.item
+                else:
+                    auto_sku = f"AUTO-ADD-{int(time.time())}-{idx}"
+                    item = InventoryItem(
+                        sku=auto_sku,
+                        title=line_item.title,
+                        author_or_publisher="Manual Entry",
+                        price=line_item.override_price,
+                        stock=999,
+                    )
+                    self._inventory.add_item(item)
+            else:
+                # Existing item behavior
+                item = InventoryItem(
+                    sku=sku,
+                    title=line_item.title,
+                    author_or_publisher="Manual Entry",
+                    price=line_item.override_price,
+                    stock=999,  
+                )
             
             line = QuoteLine(
                 requested_title=line_item.title,

@@ -54,6 +54,7 @@ service = InquiryService(
     extractor=extractor,
     matcher=matcher,
     store=store,
+    inventory=inventory,
     messenger=whatsapp,
     renderer=renderer,
     auto_send_threshold=settings.auto_send_threshold,

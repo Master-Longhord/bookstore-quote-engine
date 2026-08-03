@@ -71,7 +71,7 @@ class WhatsAppQuoteRenderer:
 
         out += [
             "", 
-            "Reply *YES* to confirm your order.",
-            "*(Please finish confirming this list before sending a new one to avoid mix-ups!)*"
+            "Reply *YES* to confirm your order, or *NO* to cancel and start over.",
+            "*(If you want to check a different list, just send the new photo!)*"
         ]
         return "\n".join(out)

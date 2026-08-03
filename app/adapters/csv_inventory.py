@@ -36,6 +36,28 @@ class CsvInventoryRepository:
     def get(self, sku: str) -> Optional[InventoryItem]:
         self._maybe_reload()
         return self._by_sku.get(sku)
+        
+    def add_item(self, item: InventoryItem) -> None:
+        """Appends a new item to the CSV and updates the in-memory cache safely."""
+        with self._lock:
+            # Append directly to the file
+            with open(self._path, mode="a", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    item.sku,
+                    item.title,
+                    item.author_or_publisher,
+                    item.price,
+                    item.stock
+                ])
+            
+            # Update the in-memory cache so we don't trigger a full reload
+            self._items.append(item)
+            if item.sku:
+                self._by_sku[item.sku] = item
+                
+            # Advance the modification time tracker so our own write doesn't trigger a reload
+            self._mtime = os.path.getmtime(self._path)
 
     def refresh(self) -> None:
         with self._lock:
@@ -79,3 +101,4 @@ class CsvInventoryRepository:
                 self.refresh()
         except OSError:
             pass  # file briefly missing mid-upload; keep serving the cache
+        

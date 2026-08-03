@@ -25,6 +25,7 @@ from app.domain.models import (
     MediaKind,
     Quote,
     QuoteLine,
+    PaymentStatus,
 )
 from app.services.quote_service import QuoteBuilder
 from app.services.pdf_service import PdfGenerator
@@ -78,32 +79,57 @@ class InquiryService:
     # ---- inbound path ----
 
     def handle_message(self, message: IncomingMessage, is_last_attempt: bool = False) -> Inquiry:
+        text_content = message.text.strip() if message.text else ""
+        upper_text = text_content.upper()
         
-        # --- 1. PAYMENT INTERCEPTOR ---
-        # Intercept messages if the customer is currently in the payment stage
-        awaiting_payment = self._store.get_awaiting_payment(message.sender)
-        if awaiting_payment:
-            awaiting_payment.status = InquiryStatus.NEEDS_PAYMENT_REVIEW
+        # --- 1. PAYMENT & CONFIRMATION INTERCEPTOR ---
+        active_quote = self._store.get_latest_quoted(message.sender)
+        
+        if active_quote and active_quote.payment_status == PaymentStatus.PENDING:
             
-            # Encode image to Base64 if a receipt screenshot was uploaded
-            if message.media_bytes:
-                encoded = base64.b64encode(message.media_bytes).decode("utf-8")
-                mime_type = message.media_mime or "image/jpeg"
-                # Store as a complete HTML data URI for easy dashboard rendering
-                awaiting_payment.payment_receipt_base64 = f"data:{mime_type};base64,{encoded}"
-            
-            # Capture any typed text as a payment note/reference
-            if message.text:
-                note = f"\n[Payment Note: {message.text.strip()}]"
-                awaiting_payment.raw_text = (awaiting_payment.raw_text or "") + note
+            # Scenario A: Customer replies "YES" to receive bank details
+            if upper_text == "YES":
+                active_quote_data = active_quote.revised_quote or active_quote.quote
+                formatted_total = f"J${active_quote_data.total:,.2f}"
                 
-            self._store.save(awaiting_payment)
+                custom_bank_message = (
+                    f"Order Ref: #{active_quote.id[:8]}\n"
+                    f"Total Amount Due: *{formatted_total}*\n\n"
+                    "Please make a transfer to the following account:\n"
+                    "• Bank: National Commercial Bank\n"
+                    "• Branch: Duke Street\n"
+                    "• Account Number: 065608154\n"
+                    "• Account Type: Savings\n"
+                    "• Account Name: Book Depot Limited\n\n"
+                    f"Once paid, please reply with the ACCOUNT NAME you transferred from and the AMOUNT sent, or upload a screenshot of your receipt. Please include your Order Ref (*#{active_quote.id[:8]}*)."
+                )
+                self._messenger.send_text(message.sender, custom_bank_message)
+                return active_quote
+
+            # Scenario B: Customer uploads a receipt (image/pdf) or sends a transaction note
+            # We ignore simple short texts like "ok", "hi", "thanks" so they do not trigger a fake payment
+            is_valid_note = len(text_content) > 5 and upper_text not in ("HELLO", "THANKS", "THANK YOU", "OKAY", "SURE")
             
-            self._messenger.send_text(
-                message.sender,
-                "Thank you! We have received your payment submission. Our team will verify it shortly and process your final receipt."
-            )
-            return awaiting_payment
+            if message.media_bytes or is_valid_note:
+                active_quote.payment_status = PaymentStatus.PROCESSING
+                
+                if message.media_bytes:
+                    encoded = base64.b64encode(message.media_bytes).decode("utf-8")
+                    mime_type = message.media_mime or "image/jpeg"
+                    active_quote.payment_receipt_base64 = f"data:{mime_type};base64,{encoded}"
+                
+                if text_content:
+                    note = f"\n[Payment Note: {text_content}]"
+                    active_quote.raw_text = (active_quote.raw_text or "") + note
+                    
+                self._store.save(active_quote)
+                
+                self._messenger.send_text(
+                    message.sender,
+                    "Thank you! We have received your payment submission. Our team will verify it shortly and process your final receipt."
+                )
+                return active_quote
+
 
         # --- 2. NORMAL NEW INQUIRY PATH ---
         inquiry = Inquiry(
@@ -120,44 +146,8 @@ class InquiryService:
             self._store.save(inquiry)
             return inquiry
 
-        # Filter out short text greetings or intercept "YES"
+        # Proceed to filter out normal short text (like "Hi", "Hello")
         if message.kind == MediaKind.TEXT:
-            text_content = message.text.strip() if message.text else ""
-            
-            # Intercept the confirmation command
-            if text_content.upper() == "YES":
-                recent_quote = self._store.get_latest_quoted(message.sender)
-                if recent_quote and (recent_quote.quote or recent_quote.revised_quote):
-                    # Transition to awaiting payment instead of final confirmation
-                    recent_quote.status = InquiryStatus.AWAITING_PAYMENT
-                    self._store.save(recent_quote)
-                    
-                    # Calculate active total and build dynamic bank instructions
-                    active_quote = recent_quote.revised_quote or recent_quote.quote
-                    formatted_total = f"J${active_quote.total:,.2f}"
-                    
-                    custom_bank_message = (
-                        f"Order Ref: #{recent_quote.id[:8]}\n"
-                        f"Total Amount Due: *{formatted_total}*\n\n"
-                        "Please make a transfer to the following account:\n"
-                        "• Bank: National Commercial Bank\n"
-                        "• Branch: Duke Street\n"
-                        "• Account Number: 065608154\n"
-                        "• Account Type: Savings\n"
-                        "• Account Name: Book Depot Limited\n\n"
-                        f"Once paid, please reply with the ACCOUNT NAME you transferred from and the AMOUNT sent, or upload a screenshot of your receipt. Please include your Order Ref (*#{recent_quote.id[:8]}*)."
-                    )
-                    
-                    self._messenger.send_text(message.sender, custom_bank_message)
-                    return recent_quote
-                else:
-                    self._messenger.send_text(
-                        message.sender,
-                        "We couldn't find an active quote to confirm. Please send your book list again."
-                    )
-                    return inquiry
-
-            # Proceed to filter out normal short text (like "Hi", "Hello")
             if len(text_content) < 15:
                 self._messenger.send_text(message.sender, EMPTY_REPLY)
                 inquiry.status = InquiryStatus.FAILED
@@ -316,4 +306,3 @@ class InquiryService:
                 if c and c.item.sku == sku:
                     return c.item
         return None
-    

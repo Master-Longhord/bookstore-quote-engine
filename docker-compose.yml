@@ -3,10 +3,8 @@ services:
     image: postgres:15-alpine
     container_name: bookstore-postgres
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: bookstore_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: bookstore
+    env_file:
+      - .env
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -16,6 +14,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 40s
 
   app:
     build: .
@@ -27,9 +26,6 @@ services:
       - ./data:/srv/data
     env_file:
       - .env
-    environment:
-      # This points to the Docker service name 'postgres' instead of 'localhost'
-      - DATABASE_URL=postgresql+psycopg://bookstore_admin:secure_password_here@postgres:5432/bookstore
     depends_on:
       postgres:
         condition: service_healthy

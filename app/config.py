@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # --- Review dashboard ---
     admin_token: str                
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 def load_settings() -> Settings:

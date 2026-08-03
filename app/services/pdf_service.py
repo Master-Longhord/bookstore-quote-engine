@@ -1,3 +1,5 @@
+import base64
+import os
 import tempfile
 from weasyprint import HTML
 from jinja2 import Template
@@ -14,7 +16,9 @@ _HTML_TEMPLATE = """
     <style>
         @page { size: A4; margin: 20mm; }
         body { font-family: system-ui, sans-serif; color: #333; }
-        h1 { border-bottom: 2px solid #333; padding-bottom: 5px; }
+        .header-container { display: flex; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+        .logo { max-height: 80px; margin-right: 20px; }
+        h1 { margin: 0; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
         th { background-color: #f9f9f9; }
@@ -31,7 +35,12 @@ _HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>Quotation from {{ store_name }}</h1>
+    <div class="header-container">
+        {% if logo_base64 %}
+        <img class="logo" src="data:image/png;base64,{{ logo_base64 }}" alt="Book Depot Logo">
+        {% endif %}
+        <h1>Quotation ** {{ store_name }}</h1>
+    </div>
     <p><strong>Customer:</strong> {{ customer_name }}</p>
     
     <table>
@@ -55,7 +64,6 @@ _HTML_TEMPLATE = """
         </tbody>
     </table>
     
-    <!-- Moved total above the footer -->
     <div class="total">Grand Total: {{ total }}</div>
     
     <div class="footer">
@@ -68,6 +76,18 @@ _HTML_TEMPLATE = """
 class PdfGenerator:
     def __init__(self, store_name: str = "BookDepot"):
         self._store_name = store_name
+        self._logo_base64 = self._load_logo()
+
+    def _load_logo(self) -> str:
+        """Loads the logo from the root directory and encodes it for embedding."""
+        # Adjust the path relative to where you run main.py (the root folder)
+        logo_path = os.path.join(os.getcwd(), "Book Depot logo 3.png")
+        try:
+            with open(logo_path, "rb") as image_file:
+                return base64.b64encode(image_file.read()).decode("utf-8")
+        except FileNotFoundError:
+            print(f"Warning: Logo not found at {logo_path}")
+            return ""
 
     def generate_quote_pdf(self, inquiry: Inquiry, quote: Quote) -> bytes:
         """Renders the quote as HTML, converts to PDF, and returns the raw bytes."""
@@ -86,7 +106,8 @@ class PdfGenerator:
         # 2. Render HTML
         template = Template(_HTML_TEMPLATE)
         html_content = template.render(
-            store_name=self._store_name,  # Injecting the dynamic store name
+            logo_base64=self._logo_base64,
+            store_name=self._store_name,  
             customer_name=inquiry.sender_name or inquiry.sender,
             lines=lines_data,
             total=jmd(quote.total)

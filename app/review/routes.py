@@ -197,7 +197,7 @@ def build_router(service, store, settings) -> APIRouter:
             
             service._messenger.send_text(
                 inquiry.sender,
-                "Payment received! Thank you. Your final receipt is attached below. Your order is now being processed for delivery."
+                "Payment received! Thank you. Your final receipt is attached below. Your order is now being processed for pick up in store."
             )
             
             service._messenger.send_document(

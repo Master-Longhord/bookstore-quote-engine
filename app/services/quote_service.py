@@ -67,7 +67,6 @@ class WhatsAppQuoteRenderer:
             out += [
                 "",
                 "Out-of-stock titles are not included in the total. "
-                "Reply here if you'd like us to source them for you.",
             ]
 
         out += [

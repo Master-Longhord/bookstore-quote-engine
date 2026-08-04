@@ -47,7 +47,7 @@ EMPTY_REPLY = (
     "Example:\n"
     "First Steps in Reading Book 1\n"
     "Integrated Science for Jamaica Grade 7\n"
-    "Primary Mathematics (Qty: 2)"
+    "Primary Mathematics (Qty: 2)\n\n"
     "*(If you have a specific question not covered by our menu, please contact our office at (876) 619-8419 for further assistance!)*"
 )
 REVIEW_REPLY = (
@@ -209,16 +209,12 @@ class InquiryService:
         inquiry.matches = [self._matcher.match(b) for b in inquiry.extracted]
         inquiry.quote = self._builder.build(inquiry.matches)
 
-        if self._all_confident(inquiry):
-            body = self._renderer.render(inquiry, inquiry.quote)
-            self._messenger.send_text(inquiry.sender, body)
-            inquiry.status = InquiryStatus.QUOTED_AUTO
-        else:
-            name = f" {inquiry.sender_name}" if inquiry.sender_name else ""
-            self._messenger.send_text(
-                inquiry.sender, REVIEW_REPLY.format(name=name)
-            )
-            inquiry.status = InquiryStatus.NEEDS_REVIEW
+        # FORCE ALL QUOTES TO MANUAL REVIEW (Skipping _all_confident check)
+        name = f" {inquiry.sender_name}" if inquiry.sender_name else ""
+        self._messenger.send_text(
+            inquiry.sender, REVIEW_REPLY.format(name=name)
+        )
+        inquiry.status = InquiryStatus.NEEDS_REVIEW
 
         self._store.save(inquiry)
         return inquiry
